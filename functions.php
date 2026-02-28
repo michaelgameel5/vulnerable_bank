@@ -106,14 +106,75 @@ function getBalance($userId) {
 }
 
 function updateProfile($userId, $fullName, $email, $password = '') {
+    global $conn;
+    $updateFields = "full_name = '$fullName', email = '$email'";
+    if (!empty($password)) { # to prevent the risk of making the sign in passwordless.
+        $updateFields .= ", password = '$password'";
+    }
+    $query = "UPDATE users SET $updateFields WHERE id = $userId";
+    if (pg_query($conn, $query)) {
+        return true;
+    }
     return false;
 }
 
 function transferFunds($fromUserId, $toUsername, $amount, $description = '') {
-    return 'Not implemented';
+    global $conn;
+    if (!is_numeric($amount) || $amount < 0) {
+        return "Invalid amount. Please enter a positive number.";
+    }
+    
+    $amount = (float)$amount;
+    $recipient = getUserByUsername($toUsername);
+    if (!$recipient) {
+        return "Recipient username not found.";
+    }
+    
+    $toUserId = $recipient['id'];
+    if ($fromUserId == $toUserId) {
+        return "You cannot transfer funds to yourself.";
+    }
+    
+    $senderBalance = getBalance($fromUserId);
+    if ($senderBalance < $amount) {
+        return "Insufficient funds. Your balance is \$$senderBalance.";
+    }
+    
+    $newSenderBalance = $senderBalance - $amount;
+    $updateSender = "UPDATE users SET balance = $newSenderBalance WHERE id = $fromUserId";
+    if (!pg_query($conn, $updateSender)) {
+        return "Transfer failed. Please try again.";
+    }
+    
+    $recipientBalance = getBalance($toUserId);
+    $newRecipientBalance = $recipientBalance + $amount;
+    $updateRecipient = "UPDATE users SET balance = $newRecipientBalance WHERE id = $toUserId";
+    if (!pg_query($conn, $updateRecipient)) {
+        $rollback = "UPDATE users SET balance = $senderBalance WHERE id = $fromUserId";
+        pg_query($conn, $rollback);
+        return "Transfer failed. Please try again.";
+    }
+    
+    $description = pg_escape_string($description); # Escape special characters to prevent SQL injection 😊
+    $insertTransaction = "INSERT INTO transactions (from_user_id, to_user_id, amount, description) VALUES ($fromUserId, $toUserId, $amount, '$description')";
+    if (!pg_query($conn, $insertTransaction)) {
+        $rollbackSender = "UPDATE users SET balance = $senderBalance WHERE id = $fromUserId";
+        $rollbackRecipient = "UPDATE users SET balance = $recipientBalance WHERE id = $toUserId";
+        pg_query($conn, $rollbackSender);
+        pg_query($conn, $rollbackRecipient);
+        return "Transfer failed. Please try again.";
+    }
+    
+    return true;
 }
 
 function getTransactions($userId, $limit = 10) {
+    global $conn;
+    $query = "SELECT * FROM transactions WHERE from_user_id = $userId OR to_user_id = $userId ORDER BY created_at DESC LIMIT $limit";
+    $result = pg_query($conn, $query);
+    if ($result) {
+        return pg_fetch_all($result);
+    }
     return [];
 }
 
