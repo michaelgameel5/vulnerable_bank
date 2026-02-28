@@ -167,6 +167,49 @@ function transferFunds($fromUserId, $toUsername, $amount, $description = '') {
     
     return true;
 }
+function requestLoan($amount, $userId) {
+    global $conn;
+
+    $loanQuery = "SELECT * FROM loans WHERE user_id = $userId AND status = 'pending'";
+    $loanResult = pg_query($conn, $checkSql);
+
+    if (pg_num_rows($loanResult) > 0) {
+        return "Pending Loan Exists";
+    }
+        $query = "INSERT INTO loans (user_id, amount) VALUES ($userId, $amount)";
+    $result = pg_query($conn, $query);
+
+    if ($result) {
+        return "Loan Requested Successfully";
+    } else {
+        return "Error submitting request";
+    }
+}    
+function resetPass($userId, $newPass) {
+    global $conn;
+
+    $query = "SELECT password FROM users WHERE id = $userId";
+    $result = pg_query($conn, $query);
+    
+    if ($result && pg_num_rows($result) > 0) {
+        $row = pg_fetch_assoc($result);
+        $oldPass = $row['password'];
+
+            if ($oldPass == $newPass) {
+            return "New Password Must Be Different From The Old Password";
+            
+        }
+    }
+
+    $updateQuery = "UPDATE users SET password = '$newPass' WHERE id = $userId";
+    $updateResult = pg_query($conn, $updateQuery);
+
+    if ($updateResult) {
+        return "Password Updated Successfully";
+    } else {
+        return "Error Updating Password";
+    }
+}
 
 function getTransactions($userId, $limit = 10) {
     global $conn;
