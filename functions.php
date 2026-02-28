@@ -106,6 +106,15 @@ function getBalance($userId) {
 }
 
 function updateProfile($userId, $fullName, $email, $password = '') {
+    global $conn;
+    $updateFields = "full_name = '$fullName', email = '$email'";
+    if (!empty($password)) { # to prevent the risk of making the sign in passwordless.
+        $updateFields .= ", password = '$password'";
+    }
+    $query = "UPDATE users SET $updateFields WHERE id = $userId";
+    if (pg_query($conn, $query)) {
+        return true;
+    }
     return false;
 }
 
