@@ -90,6 +90,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <nav>
         <a href="dashboard.php">Dashboard</a>
         <a href="transfer.php">Transfer</a>
+        <a href="bill_payment.php" class="active">Bill Payment</a>
         <a href="profile.php">Profile</a>
         <a href="logout.php">Logout</a>
     </nav>

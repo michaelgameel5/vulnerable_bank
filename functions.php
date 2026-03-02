@@ -178,6 +178,149 @@ function getTransactions($userId, $limit = 10) {
     return [];
 }
 
+function createVirtualCard($userId, $cardType = 'standard') {
+    global $conn;
+
+    $cardLimit = ($cardType === 'premium') ? 50000.00 : 10000.00;
+    
+    $cardNumber = generateCardNumber();
+    $cvv = str_pad(rand(0, 999), 3, '0', STR_PAD_LEFT);
+    $expiryDate = date('m/y', strtotime('+3 years'));
+
+    $query = "INSERT INTO virtualCards (userId, cardNumber, cvv, expiryDate, cardLimit, cardType, balance) 
+              VALUES ($userId, '$cardNumber', '$cvv', '$expiryDate', $cardLimit, '$cardType', 0.0)";
+
+    if (pg_query($conn, $query)) {
+        return [
+            'cardNumber' => $cardNumber,
+            'cvv'        => $cvv,
+            'expiryDate' => $expiryDate,
+            'cardLimit'  => $cardLimit,
+            'cardType'   => $cardType
+        ];
+    }
+    return false;
+}
+
+function fundCard($userId,$cardId, $amount) {
+    global $conn;
+    if (!is_numeric($amount) || $amount < 0) {
+        return "Invalid amount. Please enter a positive number.";
+    }
+    $amount = (float)$amount;
+    $card = getVirtualCardById($cardId);
+    if ($card['balance'] + $amount > $card['cardLimit']) {
+        return "Funding would exceed card limit.";
+    }
+
+    $user=getUserById($userId);
+    if($user['balance']<$amount){
+        return "Insufficient funds in main account.";
+    }
+    
+    $newMainBalance = $user['balance']-$amount;
+    $newCardBalance = $card['balance']+$amount;
+    $query1 = "UPDATE users SET balance = $newMainBalance WHERE id = $userId";
+    $query2 = "UPDATE virtualCards SET balance = $newCardBalance WHERE id = $cardId";
+
+    if (pg_query($conn, $query1) && pg_query($conn, $query2)) {
+        return true;
+    }
+    return false;
+}
+
+function terminateCard($userId, $cardId) {
+    global $conn;
+    $card = getVirtualCardById($cardId);
+    $user = getUserById($userId);
+    
+    $query1 = "UPDATE users SET balance = balance + {$card['balance']} WHERE id = $userId";
+    $query2 = "DELETE FROM virtualCards WHERE id = $cardId";
+    if (pg_query($conn, $query1) && pg_query($conn, $query2)) {
+        return true;
+    }
+    return false;
+}
+
+function getVirtualCardById($cardId) {
+    global $conn;
+    $query = "SELECT * FROM virtualCards WHERE id = $cardId";
+    $result = pg_query($conn, $query);
+    if ($result && pg_num_rows($result) === 1) {
+        return pg_fetch_assoc($result);
+    }
+    return false;
+}
+
+function getVirtualCards($userId) {
+    global $conn;
+    $query = "SELECT * FROM virtualCards WHERE userId = $userId";
+    $result = pg_query($conn, $query);
+    if ($result) {
+        return pg_fetch_all($result);
+    }
+    return [];
+}
+
+function generateCardNumber() {
+    $prefix ='4000';
+    $cardNumber = $prefix.str_pad(rand(0, 999999999999), 12, '0', STR_PAD_LEFT);
+    return $cardNumber;
+}
+
+function payBill($userId, $billerId, $amount, $paymentMethod, $referenceNumber, $cardId=NULL){
+    if (!is_numeric($amount) || $amount < 0) {
+        return "Invalid amount. Please enter a positive number.";
+    }
+
+    global $conn;
+    $amount = (float)$amount;
+    $user = getUserById($userId);
+    if($user['balance'] < $amount){
+        return "Insufficient funds in main account.";
+    }
+    if ($paymentMethod == "balance") {
+        $newBalance = $user['balance'] - $amount;
+        $query = "UPDATE users SET balance = $newBalance WHERE id = $userId";
+        if (pg_query($conn, $query)) {
+            $query2 = "INSERT INTO billPayments (userId, billerId, amount, paymentMethod, cardId, referenceNumber) VALUES ($userId, $billerId, $amount, '$paymentMethod', NULL, '$referenceNumber')";
+            if (pg_query($conn, $query2)) {
+                return true;
+            }
+        }
+    } else if ($paymentMethod == "card") {
+        if (!$cardId) {
+            return "Card ID is required for card payment.";
+        }
+        $card = getVirtualCardById($cardId);
+        if (!$card || $card['balance'] < $amount) {
+            return "Insufficient funds in virtual card.";
+        }
+
+        $newCardBalance = $card['balance'] - $amount;
+        $queryCard = "UPDATE virtualCards SET balance = $newCardBalance WHERE id = $cardId";
+        
+        if (pg_query($conn, $queryCard)) {
+            $query2 = "INSERT INTO billPayments (userId, billerId, amount, paymentMethod, cardId, referenceNumber) VALUES ($userId, $billerId, $amount, '$paymentMethod', '$cardId', '$referenceNumber')";
+            if (pg_query($conn, $query2)) {
+                return true;
+            }
+        }
+    } else {
+        return "Invalid payment method.";
+    }
+}
+                        
+function getBillers() {
+    global $conn;
+    $query = "SELECT * FROM billers WHERE isActive = TRUE";
+    $result = pg_query($conn, $query);
+    if ($result) {
+        return pg_fetch_all($result);
+    }
+    return [];
+}
+
 function isLoggedIn() {
     $payload = getJwtPayload();
     return $payload !== false;
